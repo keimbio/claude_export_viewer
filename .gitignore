@@ -1,0 +1,4 @@
+.DS_Store
+*.zip
+conversations.json
+node_modules/
