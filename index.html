@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Export Viewer</title>
+  <link rel="stylesheet" href="./fonts/fonts.css">
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div id="bg-layer"></div>
+  <div id="bg-overlay"></div>
+
+  <div id="app">
+    <!-- ===================== SIDEBAR ===================== -->
+    <aside id="sidebar">
+      <div class="sidebar-head">
+        <div class="brand">
+          <div class="logo"></div>
+          <div>
+            <h1>Claude Export Viewer</h1>
+            <div class="sub">Local · private · offline</div>
+          </div>
+        </div>
+        <div id="dropzone">
+          <div class="dz-title">Drop .zip or .json exports here</div>
+          <div class="dz-sub">Import one or many — they merge automatically</div>
+          <button class="btn-choose" id="btn-choose">Choose files</button>
+          <input type="file" id="file-input" accept=".zip,.json" multiple hidden>
+          <div class="import-status" id="import-status"></div>
+        </div>
+      </div>
+
+      <div class="sb-section">
+        <div class="search-wrap">
+          <span class="ico">⌕</span>
+          <input type="text" id="search" placeholder="Search conversations…" autocomplete="off">
+        </div>
+        <div class="filter-row">
+          <label><input type="radio" name="scope" value="full" checked> Full text</label>
+          <label><input type="radio" name="scope" value="title"> Title only</label>
+          <label><input type="checkbox" id="f-artifacts"> Has artifacts</label>
+        </div>
+        <div class="date-row">
+          <input type="date" id="date-from" title="From date">
+          <input type="date" id="date-to" title="To date">
+        </div>
+        <div class="sort-row">
+          <label><input type="radio" name="sortkey" value="updated" checked> Modified</label>
+          <label><input type="radio" name="sortkey" value="created"> Created</label>
+          <label><input type="radio" name="sortdir" value="desc" checked> Newest</label>
+          <label><input type="radio" name="sortdir" value="asc"> Oldest</label>
+        </div>
+      </div>
+
+      <div class="list-head">
+        <span id="conv-count">No conversations</span>
+        <button class="btn sm" id="btn-lib-menu" title="Library actions">Library ▾</button>
+      </div>
+      <div id="conv-list"></div>
+    </aside>
+
+    <!-- ===================== MAIN ===================== -->
+    <main id="main">
+      <div id="toolbar">
+        <div class="tb-title">
+          <h2 id="conv-title">Claude Export Viewer</h2>
+          <div class="dates" id="conv-dates">Import an export to begin</div>
+        </div>
+        <div class="tb-actions">
+          <button class="btn" id="btn-select" title="Select messages">☑ Select</button>
+          <button class="btn" id="btn-share-conv" title="Copy conversation">⧉ Copy</button>
+          <button class="btn primary" id="btn-export-conv" title="Export conversation">↧ Export</button>
+          <div class="fs-controls" title="Text size">
+            <button id="fs-dec">A−</button><button id="fs-inc">A+</button>
+          </div>
+          <button class="btn icon" id="btn-theme" title="Toggle theme">◐</button>
+          <button class="btn icon" id="btn-settings" title="Appearance">⚙</button>
+        </div>
+      </div>
+
+      <div id="messages">
+        <div class="empty" id="empty-state">
+          <div>
+            <div class="logo-lg"></div>
+            <div class="big">No conversation selected</div>
+            <div>Import your Claude export (.zip or .json) using the panel on the left,<br>then pick a conversation to view it here.</div>
+          </div>
+        </div>
+        <div id="messages-inner" style="display:none"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- selection action bar -->
+  <div id="sel-bar">
+    <span class="cnt" id="sel-count">0 selected</span>
+    <button class="btn sm" id="sel-copy">⧉ Copy</button>
+    <button class="btn sm primary" id="sel-export">↧ Export</button>
+    <button class="btn sm" id="sel-clear">Clear</button>
+  </div>
+
+  <!-- generic popover menu -->
+  <div class="menu" id="popmenu"></div>
+
+  <!-- generic modal (artifact viewer / attachment) -->
+  <div class="modal-back" id="modal-back">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modal-title">Title</h3>
+        <button class="btn sm" id="modal-dl">↧ Download</button>
+        <button class="btn sm" id="modal-dl-alt">Download as…</button>
+        <button class="btn icon" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- settings modal -->
+  <div class="modal-back" id="settings-back">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-head">
+        <h3>Appearance</h3>
+        <button class="btn icon" id="settings-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="set-group">
+          <div class="lab">Theme</div>
+          <button class="btn" data-theme-set="dark">🌙 Dark</button>
+          <button class="btn" data-theme-set="light">☀ Light</button>
+        </div>
+        <div class="set-group">
+          <div class="lab">Background image</div>
+          <div class="bg-grid" id="bg-grid"></div>
+          <input type="file" id="bg-upload" accept="image/*" hidden>
+        </div>
+        <div class="set-group">
+          <div class="lab">Background dimming</div>
+          <input type="range" id="bg-opacity" min="0" max="0.95" step="0.05" value="0.55">
+        </div>
+        <div class="set-group">
+          <div class="lab">Text size</div>
+          <input type="range" id="fs-range" min="0.8" max="1.5" step="0.05" value="1">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <!-- local libraries (no CDN) -->
+  <script src="./lib/jszip.min.js"></script>
+  <script src="./lib/jspdf.umd.min.js"></script>
+  <script src="./lib/html2canvas.min.js"></script>
+  <!-- app -->
+  <script src="./js/parser.js"></script>
+  <script src="./js/export.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>

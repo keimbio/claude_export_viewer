@@ -1,0 +1,16 @@
+PUT YOUR BACKGROUND IMAGES IN THIS FOLDER
+==========================================
+
+The viewer looks for these four files by name (the ones you provided).
+Copy them into this folder exactly as named:
+
+  DARK-MODE-susan-wilkinson-4rDgxdT_4wI-unsplash.jpg   (dark · green/blue marble)
+  DARK-MODE-pawel-czerwinski-4x3VAM19wDA-unsplash.jpg  (dark · deep blue marble)
+  LIGHT-MODE-aljoscha-laschgari-Nm_liipBlsY-unsplash.jpg (light · grey/teal marble)
+  LIGHT-MODE-susan-wilkinson-_vpDiW27L0k-unsplash.jpg  (light · blue/green/white)
+
+If a file is missing, the app simply falls back to a solid background color —
+nothing breaks. You can also pick "None" or upload any custom image from inside
+the app (⚙ Appearance → Background image → + Upload).
+
+You can delete this .txt file once your images are in place.
