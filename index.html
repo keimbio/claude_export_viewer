@@ -55,7 +55,10 @@
 
       <div class="list-head">
         <span id="conv-count">No conversations</span>
-        <button class="btn sm" id="btn-lib-menu" title="Library actions">Library ▾</button>
+        <span class="list-head-actions">
+          <button class="btn sm" id="btn-conv-select" title="Select several conversations to export together">☑ Select</button>
+          <button class="btn sm" id="btn-lib-menu" title="Export or manage the whole library">⤓ Export all ▾</button>
+        </span>
       </div>
       <div id="conv-list"></div>
     </aside>
@@ -98,6 +101,15 @@
     <button class="btn sm" id="sel-copy">⧉ Copy</button>
     <button class="btn sm primary" id="sel-export">↧ Export</button>
     <button class="btn sm" id="sel-clear">Clear</button>
+  </div>
+
+  <!-- conversation (multi-chat) selection bar -->
+  <div id="conv-sel-bar">
+    <span class="cnt" id="conv-sel-count">0 conversations</span>
+    <button class="btn sm" id="conv-sel-all">Select all shown</button>
+    <button class="btn sm primary" id="conv-sel-export">↧ Export selected ▾</button>
+    <button class="btn sm" id="conv-sel-clear">Clear</button>
+    <button class="btn sm" id="conv-sel-done">Done</button>
   </div>
 
   <!-- generic popover menu -->

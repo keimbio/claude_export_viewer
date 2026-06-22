@@ -92,34 +92,96 @@ pre{background:rgba(0,0,0,.35);padding:12px;border-radius:8px;overflow:auto;font
   }
 
   // ---------- pdf (jsPDF text layout) ----------
+  // Wrap text to maxW. Splits on real newlines, then on spaces (via jsPDF),
+  // then HARD-breaks any remaining over-long run by character so nothing
+  // overflows the right margin. Assumes the caller already set the font/size.
+  function wrapText(doc, text, maxW) {
+    const out = [];
+    String(text == null ? '' : text).replace(/\r\n?/g, '\n').replace(/\t/g, '  ').split('\n').forEach(line => {
+      if (line === '') { out.push(''); return; }
+      doc.splitTextToSize(line, maxW).forEach(seg => {
+        // jsPDF only breaks on spaces; force-break long unbreakable tokens.
+        while (seg.length > 1 && doc.getTextWidth(seg) > maxW) {
+          let lo = 1, hi = seg.length;
+          while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (doc.getTextWidth(seg.slice(0, mid)) <= maxW) lo = mid; else hi = mid - 1; }
+          out.push(seg.slice(0, lo)); seg = seg.slice(lo);
+        }
+        out.push(seg);
+      });
+    });
+    return out;
+  }
+
+  function makeCtx(doc) {
+    const M = 48, W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    return { doc, M, W, H, maxW: W - M * 2, y: M };
+  }
+
+  // Draw a text block. One VISUAL line per draw, y advanced by a real line
+  // height each time — this is what keeps lines from overlapping.
+  function block(ctx, text, opt) {
+    opt = opt || {};
+    const size = opt.size || 10.5, mono = !!opt.mono, indent = opt.indent || 0;
+    ctx.doc.setFont(mono ? 'courier' : 'helvetica', opt.style || 'normal');
+    ctx.doc.setFontSize(size);
+    ctx.doc.setTextColor(opt.color || '#1c2b2e');
+    const lh = size * 1.42;
+    wrapText(ctx.doc, text, ctx.maxW - indent).forEach(ln => {
+      if (ctx.y + lh > ctx.H - ctx.M) { ctx.doc.addPage(); ctx.y = ctx.M; }
+      ctx.doc.text(ln, ctx.M + indent, ctx.y);
+      ctx.y += lh;
+    });
+    if (opt.gapAfter) ctx.y += opt.gapAfter;
+  }
+
+  // Render a message body with fenced-code awareness: ```code``` -> monospace.
+  function renderBody(ctx, text) {
+    if (!text) return;
+    String(text).split('```').forEach((part, i) => {
+      if (part === '') return;
+      if (i % 2 === 1) {
+        const body = part.replace(/^[ \t]*[\w.+-]*\n/, '').replace(/\n+$/, ''); // strip lang label + trailing nl
+        block(ctx, body, { size: 8.5, mono: true, color: '#243', gapAfter: 5 });
+      } else {
+        block(ctx, part.replace(/^\n+|\n+$/g, ''), { size: 10.5, color: '#1c2b2e', gapAfter: 3 });
+      }
+    });
+  }
+
+  function renderConversation(ctx, c) {
+    block(ctx, c.title, { size: 18, style: 'bold', color: '#143028', gapAfter: 2 });
+    block(ctx, 'Created: ' + fmtDate(c.created) + '   Updated: ' + fmtDate(c.updated), { size: 9, style: 'italic', color: '#5a7075', gapAfter: 8 });
+    c.messages.forEach(m => {
+      if (ctx.y + 28 > ctx.H - ctx.M) { ctx.doc.addPage(); ctx.y = ctx.M; }
+      ctx.y += 6;
+      ctx.doc.setDrawColor('#cdd8d8'); ctx.doc.line(ctx.M, ctx.y, ctx.W - ctx.M, ctx.y); ctx.y += 14;
+      block(ctx, who(m.sender) + '  ·  ' + fmtDate(m.created), { size: 10, style: 'bold', color: m.sender === 'human' ? '#2a6f95' : '#2f8f63', gapAfter: 3 });
+      renderBody(ctx, m.text);
+      m.attachments.forEach(a => {
+        block(ctx, 'Attachment: ' + a.name, { size: 9, style: 'italic', color: '#5a7075', gapAfter: 2 });
+        if (a.content) block(ctx, a.content, { size: 8, mono: true, color: '#3a5055', gapAfter: 5 });
+      });
+      m.artifactIds.forEach(id => {
+        const art = c.artifacts.find(x => x.id === id); if (!art) return;
+        block(ctx, 'Artifact: ' + art.title + ' (' + art.filename + ')', { size: 9.5, style: 'bold', color: '#2f8f63', gapAfter: 2 });
+        block(ctx, art.content, { size: 8, mono: true, color: '#243', gapAfter: 5 });
+      });
+    });
+  }
+
   function conversationToPdf(c) {
     const { jsPDF } = global.jspdf;
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const M = 48, W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-    const maxW = W - M * 2; let y = M;
-    function need(h) { if (y + h > H - M) { doc.addPage(); y = M; } }
-    function write(text, size, style, color) {
-      doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size);
-      doc.setTextColor(color || '#1c2b2e');
-      const lines = doc.splitTextToSize(text, maxW);
-      lines.forEach(ln => { need(size + 4); doc.text(ln, M, y); y += size + 4; });
-    }
-    write(c.title, 18, 'bold', '#143028'); y += 2;
-    write('Created: ' + fmtDate(c.created) + '   Updated: ' + fmtDate(c.updated), 9, 'italic', '#5a7075'); y += 8;
-    c.messages.forEach(m => {
-      need(28); y += 6;
-      doc.setDrawColor('#cdd8d8'); doc.line(M, y, W - M, y); y += 14;
-      write(who(m.sender) + '  ·  ' + fmtDate(m.created), 10, 'bold', m.sender === 'human' ? '#2a6f95' : '#2f8f63');
-      y += 2;
-      if (m.text) write(m.text, 10.5, 'normal', '#1c2b2e');
-      m.attachments.forEach(a => { y += 4; write('Attachment: ' + a.name, 9, 'italic', '#5a7075'); if (a.content) write(a.content, 8.5, 'normal', '#3a5055'); });
-      m.artifactIds.forEach(id => {
-        const art = c.artifacts.find(x => x.id === id); if (!art) return;
-        y += 6; write('Artifact: ' + art.title + ' (' + art.filename + ')', 9.5, 'bold', '#2f8f63');
-        doc.setFont('courier', 'normal'); doc.setFontSize(8); doc.setTextColor('#243');
-        doc.splitTextToSize(art.content, maxW).forEach(ln => { need(11); doc.text(ln, M, y); y += 11; });
-      });
-    });
+    renderConversation(makeCtx(doc), c);
+    return doc;
+  }
+
+  // Multiple conversations into one PDF (page break between each).
+  function conversationsToPdf(convs) {
+    const { jsPDF } = global.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const ctx = makeCtx(doc);
+    convs.forEach((c, i) => { if (i) { doc.addPage(); ctx.y = ctx.M; } renderConversation(ctx, c); });
     return doc;
   }
 
@@ -168,7 +230,7 @@ pre{background:rgba(0,0,0,.35);padding:12px;border-radius:8px;overflow:auto;font
     download, fmtDate,
     messageToText, messageToMarkdown,
     conversationToText, conversationToMarkdown, conversationToJson, conversationToHtml,
-    conversationToPdf, nodeToPng,
+    conversationToPdf, conversationsToPdf, nodeToPng,
     downloadArtifact, libraryToJson, libraryToZip
   };
 })(window);

@@ -20,6 +20,8 @@
     activeId: null,
     selecting: false,
     selected: new Set(),  // message ids in active conversation
+    convSelecting: false,
+    convSelected: new Set(), // conversation ids selected in the sidebar
     settings: { theme: 'dark', bg: 'dark1', customBg: null, bgOpacity: 0.55, fsScale: 1 }
   };
 
@@ -57,15 +59,26 @@
     document.documentElement.setAttribute('data-theme', s.theme);
     document.documentElement.style.setProperty('--fs-scale', s.fsScale);
     document.documentElement.style.setProperty('--bg-overlay', s.bgOpacity);
-    let img = 'none';
-    if (s.bg === 'custom' && s.customBg) img = `url('${s.customBg}')`;
+    // Resolve the chosen background to a plain URL (or null = solid colour).
+    let url = null, presetFile = null;
+    if (s.bg === 'custom' && s.customBg) url = s.customBg;
     else if (s.bg && s.bg !== 'none') {
       const b = BACKGROUNDS.find(x => x.id === s.bg);
-      if (b) img = `url('./assets/backgrounds/${b.file}')`;
+      if (b) { url = `./assets/backgrounds/${b.file}`; presetFile = b.file; }
     }
-    document.documentElement.style.setProperty('--bg-image', img);
-    $('#fs-range').value = s.fsScale;
-    $('#bg-opacity').value = s.bgOpacity;
+    // Set the image DIRECTLY on the layer element — same mechanism the grid
+    // thumbnails use — rather than routing a url() through a CSS variable.
+    const layer = $('#bg-layer');
+    if (layer) layer.style.backgroundImage = url ? `url("${url}")` : 'none';
+    document.documentElement.style.setProperty('--bg-image', url ? `url("${url}")` : 'none');
+    // For preset files, confirm the file actually loads; warn by name if not.
+    if (presetFile) {
+      const probe = new Image();
+      probe.onerror = () => toast('Background image not found — add “' + presetFile + '” to assets/backgrounds/');
+      probe.src = url;
+    }
+    if ($('#fs-range')) $('#fs-range').value = s.fsScale;
+    if ($('#bg-opacity')) $('#bg-opacity').value = s.bgOpacity;
     renderBgGrid();
   }
 
@@ -187,14 +200,22 @@
       const firstUser = c.messages.find(m => m.sender === 'human');
       const preview = (firstUser ? firstUser.text : (c.messages[0] && c.messages[0].text) || c.summary || '').slice(0, 160);
       const el = document.createElement('div');
-      el.className = 'conv-card' + (c.id === state.activeId ? ' active' : '');
+      el.className = 'conv-card' + (c.id === state.activeId ? ' active' : '') + (state.convSelected.has(c.id) ? ' csel' : '');
       el.innerHTML =
+        `<input type="checkbox" class="sel-box"${state.convSelected.has(c.id) ? ' checked' : ''}>` +
         `<div class="title">${escapeHtml(c.title)}</div>` +
         `<div class="preview">${escapeHtml(preview)}</div>` +
         `<div class="meta"><span>${X.fmtDate(c.updated || c.created)}</span>` +
         `<span>${c.messages.length} msg</span>` +
         (c.artifacts.length ? `<span class="badge-art">🧩 ${c.artifacts.length}</span>` : '') + `</div>`;
-      el.onclick = () => selectConversation(c.id);
+      const toggle = () => {
+        if (state.convSelected.has(c.id)) state.convSelected.delete(c.id); else state.convSelected.add(c.id);
+        el.classList.toggle('csel', state.convSelected.has(c.id));
+        const cb = el.querySelector('.sel-box'); if (cb) cb.checked = state.convSelected.has(c.id);
+        updateConvSelBar();
+      };
+      el.querySelector('.sel-box').onclick = (e) => { e.stopPropagation(); toggle(); };
+      el.onclick = () => { if (state.convSelecting) toggle(); else selectConversation(c.id); };
       wrap.appendChild(el);
     });
   }
@@ -290,6 +311,36 @@
   }
   function clearSelection() { state.selected.clear(); state.selecting = false; document.body.classList.remove('selecting'); $$('.msg.selected').forEach(n => n.classList.remove('selected')); updateSelBar(); }
 
+  /* ---------------- conversation (multi-chat) selection ---------------- */
+  function updateConvSelBar() {
+    const n = state.convSelected.size;
+    $('#conv-sel-count').textContent = n + ' conversation' + (n === 1 ? '' : 's');
+    $('#conv-sel-bar').classList.toggle('show', state.convSelecting);
+  }
+  function toggleConvSelectMode(on) {
+    state.convSelecting = (on === undefined) ? !state.convSelecting : on;
+    if (state.convSelecting) clearSelection(); // the two select modes are mutually exclusive
+    document.body.classList.toggle('conv-selecting', state.convSelecting);
+    if (!state.convSelecting) { state.convSelected.clear(); renderList(); }
+    $('#btn-conv-select').classList.toggle('primary', state.convSelecting);
+    updateConvSelBar();
+  }
+  function getConvSelected() {
+    return state.library.filter(c => state.convSelected.has(c.id));
+  }
+  function convSelectionExportMenu(anchor) {
+    const sel = getConvSelected();
+    if (!sel.length) return toast('No conversations selected');
+    const base = 'claude-' + sel.length + '-conversations';
+    showMenu(anchor, [
+      { header: sel.length + ' selected' },
+      { label: 'ZIP (md + artifacts)', fn: async () => { toast('Zipping…'); const blob = await X.libraryToZip(sel, { md: true, artifacts: true }); X.download(base + '.zip', blob); } },
+      { label: 'Merged JSON (.json)', fn: () => X.download(base + '.json', X.libraryToJson(sel), 'application/json') },
+      { label: 'Combined Markdown (.md)', fn: () => X.download(base + '.md', sel.map(X.conversationToMarkdown).join('\n\n'), 'text/markdown') },
+      { label: 'Combined PDF (.pdf)', fn: () => { toast('Building PDF…'); setTimeout(() => X.conversationsToPdf(sel).save(base + '.pdf'), 30); } }
+    ]);
+  }
+
   /* ---------------- copy helpers ---------------- */
   function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -356,16 +407,17 @@
 
   function libraryMenu(anchor) {
     showMenu(anchor, [
-      { header: 'Whole library' },
-      { label: `Export all as merged JSON`, fn: () => X.download('claude-library.json', X.libraryToJson(state.library), 'application/json') },
-      { label: `Export all as ZIP (md + artifacts)`, fn: async () => { toast('Zipping library…'); const blob = await X.libraryToZip(state.library, { md: true, artifacts: true }); X.download('claude-library.zip', blob); } },
+      { header: 'All ' + state.library.length + ' conversations' },
+      { label: 'Export ALL as merged JSON', fn: () => X.download('claude-library.json', X.libraryToJson(state.library), 'application/json') },
+      { label: 'Export ALL as ZIP (md + artifacts)', fn: async () => { toast('Zipping library…'); const blob = await X.libraryToZip(state.library, { md: true, artifacts: true }); X.download('claude-library.zip', blob); } },
+      { label: 'Export ALL as combined PDF', fn: () => { toast('Building PDF…'); setTimeout(() => X.conversationsToPdf(state.library).save('claude-library.pdf'), 30); } },
       { sep: true },
       { label: 'Clear library…', fn: clearLibrary }
     ]);
   }
   async function clearLibrary() {
     if (!confirm('Remove all imported conversations from this viewer? Your original export files are not touched.')) return;
-    state.library = []; state.activeId = null; await persistLibrary(); clearSelection(); renderList(); renderConversation(); toast('Library cleared');
+    state.library = []; state.activeId = null; state.convSelected.clear(); await persistLibrary(); clearSelection(); toggleConvSelectMode(false); renderList(); renderConversation(); toast('Library cleared');
   }
 
   function artifactAltMenu(anchor, art) {
@@ -415,13 +467,14 @@
   /* ---------------- bg grid ---------------- */
   function renderBgGrid() {
     const grid = $('#bg-grid'); if (!grid) return; grid.innerHTML = '';
-    const mk = (id, label, style, cls) => {
+    const mk = (id, label, style, cls, fileUrl) => {
       const d = document.createElement('div'); d.className = 'bg-opt ' + (cls || '') + (state.settings.bg === id ? ' sel' : '');
       if (style) d.style.cssText = style; if (label) d.textContent = label;
       d.onclick = () => { state.settings.bg = id; saveSettings(); applyAppearance(); };
       grid.appendChild(d);
+      if (fileUrl) { const p = new Image(); p.onerror = () => { d.classList.add('bg-missing'); d.title = 'Image file not found in assets/backgrounds/'; }; p.src = fileUrl; }
     };
-    BACKGROUNDS.forEach(b => mk(b.id, '', `background-image:url('./assets/backgrounds/${b.file}')`));
+    BACKGROUNDS.forEach(b => mk(b.id, '', `background-image:url('./assets/backgrounds/${b.file}')`, '', `./assets/backgrounds/${b.file}`));
     if (state.settings.customBg) mk('custom', '', `background-image:url('${state.settings.customBg}')`);
     mk('none', 'None', '', 'none');
     const up = document.createElement('div'); up.className = 'bg-opt none'; up.textContent = '+ Upload';
@@ -446,7 +499,14 @@
     $('#btn-export-conv').onclick = e => conversationExportMenu(e.currentTarget);
     $('#btn-share-conv').onclick = () => { const c = activeConv(); if (!c) return toast('No conversation'); copyText(X.conversationToMarkdown(c)); };
     $('#btn-lib-menu').onclick = e => libraryMenu(e.currentTarget);
-    $('#btn-select').onclick = () => { if (state.selecting && !state.selected.size) { /* off */ } state.selecting = !state.selecting; document.body.classList.toggle('selecting', state.selecting); if (!state.selecting) clearSelection(); else toast('Tap ☑ on messages to select'); };
+    $('#btn-select').onclick = () => { if (state.convSelecting) toggleConvSelectMode(false); state.selecting = !state.selecting; document.body.classList.toggle('selecting', state.selecting); if (!state.selecting) clearSelection(); else toast('Tap ☑ on messages to select'); };
+
+    // conversation (multi-chat) selection
+    $('#btn-conv-select').onclick = () => { toggleConvSelectMode(); renderList(); if (state.convSelecting) toast('Tick conversations, then “Export selected”'); };
+    $('#conv-sel-all').onclick = () => { sortedFiltered().forEach(c => state.convSelected.add(c.id)); renderList(); updateConvSelBar(); };
+    $('#conv-sel-clear').onclick = () => { state.convSelected.clear(); renderList(); updateConvSelBar(); };
+    $('#conv-sel-export').onclick = e => convSelectionExportMenu(e.currentTarget);
+    $('#conv-sel-done').onclick = () => toggleConvSelectMode(false);
 
     // selection bar
     $('#sel-clear').onclick = clearSelection;

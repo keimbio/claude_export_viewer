@@ -14,7 +14,7 @@ Existing viewers tend to break on older conversations and on any chat containing
 - **Reconstructs artifacts** and saves them with the correct file type (`.py`, `.md`, `.svg`, `.html`, etc.).
 - **Merge multiple exports** into one library, automatically de-duplicated (newest copy of a conversation wins) and sortable by date or title.
 - **Copy** any single message, or a whole conversation (formatted or plain).
-- **Export** selected messages or whole conversations to **txt, md, json, pdf, or png**; export a conversation's artifacts as a zip; export your entire library as merged JSON or a structured ZIP.
+- **Export** selected messages or whole conversations to **txt, md, json, pdf, or png**; **select multiple conversations** in the sidebar (☑ Select) and export them together as a ZIP, merged JSON, combined Markdown, or combined PDF; export a conversation's artifacts as a zip; or **export the entire library** at once (⤓ Export all).
 - **Search & filter** by title or full text, restrict to conversations containing artifacts, set a date range, and sort newest/oldest by created or modified date.
 - **Appearance** — dark-mode-first glassmorphism in blues/greens/greys, all text in Hanken Grotesk, adjustable text size, a light theme, and an optional semi-transparent background image with an opacity slider.
 
