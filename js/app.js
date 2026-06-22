@@ -22,7 +22,7 @@
     selected: new Set(),  // message ids in active conversation
     convSelecting: false,
     convSelected: new Set(), // conversation ids selected in the sidebar
-    settings: { theme: 'dark', bg: 'dark1', customBg: null, bgOpacity: 0.55, fsScale: 1 }
+    settings: { theme: 'dark', bg: 'dark1', customBg: null, bgOpacity: 0.55, fsScale: 1, textFont: 'hanken', codeFont: 'menlo' }
   };
 
   /* ---------------- IndexedDB (library persistence) ---------------- */
@@ -79,6 +79,21 @@
     }
     if ($('#fs-range')) $('#fs-range').value = s.fsScale;
     if ($('#bg-opacity')) $('#bg-opacity').value = s.bgOpacity;
+    // fonts
+    const TEXT_FONTS = {
+      hanken: "'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      lucida: "'Lucida Grande', 'Lucida Sans Unicode', -apple-system, sans-serif",
+      helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif"
+    };
+    const CODE_FONTS = {
+      menlo: "'Menlo', 'Monaco', 'SF Mono', ui-monospace, monospace",
+      monaco: "'Monaco', 'Menlo', 'SF Mono', ui-monospace, monospace",
+      andale: "'Andale Mono', 'Menlo', 'Monaco', ui-monospace, monospace"
+    };
+    document.documentElement.style.setProperty('--font', TEXT_FONTS[s.textFont] || TEXT_FONTS.hanken);
+    document.documentElement.style.setProperty('--code-font', CODE_FONTS[s.codeFont] || CODE_FONTS.menlo);
+    if ($('#text-font')) $('#text-font').value = s.textFont || 'hanken';
+    if ($('#code-font')) $('#code-font').value = s.codeFont || 'menlo';
     renderBgGrid();
   }
 
@@ -366,7 +381,7 @@
     if (top + mh > innerHeight - 8) top = r.top - mh - 6;
     menu.style.left = Math.max(8, left) + 'px'; menu.style.top = Math.max(8, top) + 'px';
   }
-  document.addEventListener('click', e => { const m = $('#popmenu'); if (m.classList.contains('open') && !m.contains(e.target) && !e.target.closest('[data-exp],[data-art-alt],#btn-export-conv,#btn-lib-menu,#sel-export')) m.classList.remove('open'); });
+  document.addEventListener('click', e => { const m = $('#popmenu'); if (m.classList.contains('open') && !m.contains(e.target) && !e.target.closest('[data-exp],[data-art-alt],#btn-export-conv,#btn-lib-menu,#sel-export,#conv-sel-export')) m.classList.remove('open'); });
 
   /* ---------------- export menus ---------------- */
   function messageExportMenu(anchor, m, c) {
@@ -548,6 +563,8 @@
     $$('[data-theme-set]').forEach(b => b.onclick = () => { state.settings.theme = b.dataset.themeSet; saveSettings(); applyAppearance(); });
     $('#bg-opacity').oninput = e => { state.settings.bgOpacity = +e.target.value; saveSettings(); applyAppearance(); };
     $('#bg-upload').onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { state.settings.customBg = r.result; state.settings.bg = 'custom'; saveSettings(); applyAppearance(); }; r.readAsDataURL(f); };
+    $('#text-font').onchange = e => { state.settings.textFont = e.target.value; saveSettings(); applyAppearance(); };
+    $('#code-font').onchange = e => { state.settings.codeFont = e.target.value; saveSettings(); applyAppearance(); };
 
     // modal close
     $('#modal-close').onclick = () => $('#modal-back').classList.remove('open');

@@ -154,6 +154,22 @@
           <div class="lab">Text size</div>
           <input type="range" id="fs-range" min="0.8" max="1.5" step="0.05" value="1">
         </div>
+        <div class="set-group">
+          <div class="lab">Text font</div>
+          <select id="text-font" class="font-select">
+            <option value="hanken">Hanken Grotesk</option>
+            <option value="lucida">Lucida Grande</option>
+            <option value="helvetica">Helvetica Neue</option>
+          </select>
+        </div>
+        <div class="set-group">
+          <div class="lab">Code font</div>
+          <select id="code-font" class="font-select">
+            <option value="menlo">Menlo</option>
+            <option value="monaco">Monaco</option>
+            <option value="andale">Andale Mono</option>
+          </select>
+        </div>
       </div>
     </div>
   </div>
@@ -165,6 +181,7 @@
   <script src="./lib/jspdf.umd.min.js"></script>
   <script src="./lib/html2canvas.min.js"></script>
   <!-- app -->
+  <script src="./js/pdf-fonts.js"></script>
   <script src="./js/parser.js"></script>
   <script src="./js/export.js"></script>
   <script src="./js/app.js"></script>

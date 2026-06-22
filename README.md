@@ -67,7 +67,8 @@ The application code (the parser, exporters, UI, and the lightweight Markdown re
 - **JSZip** (v3.10.1) — reads and writes `.zip` files. © Stuart Knightley, dual-licensed MIT / GPLv3 (used here under MIT). Includes **pako** (MIT) by Vitaly Puzrin and Andrey Tupitsin.
 - **jsPDF** (v4.2.1) — PDF generation. © James Hall and yWorks GmbH, MIT License.
 - **html2canvas** (v1.4.1) — renders DOM nodes to PNG. © Niklas von Hertzen, MIT License.
-- **Hanken Grotesk** — the typeface used throughout, designed by Alfredo Marco Pradil and distributed via [Fontsource](https://fontsource.org). Licensed under the SIL Open Font License 1.1.
+- **Hanken Grotesk** — the typeface used throughout, designed by Alfredo Marco Pradil and distributed via [Fontsource](https://fontsource.org). Licensed under the SIL Open Font License 1.1. Also embedded into exported PDFs so they match the app.
+- **DejaVu Sans Mono** — the monospace font embedded in exported PDFs for code blocks (a free, public-domain-style face in the lineage that Menlo descends from). [DejaVu Fonts](https://dejavu-fonts.github.io/), free license.
 - **Background photographs** — provided via [Unsplash](https://unsplash.com) under the Unsplash License, by Susan Wilkinson, Paweł Czerwiński, and Aljoscha Laschgari. (Not committed to this repo; supplied by the user.)
 
 Design language adapted from the author's own [PCR-Calculator-Q5](https://keimbio.github.io/PCR-Calculator-Q5/).
