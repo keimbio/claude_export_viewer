@@ -259,7 +259,7 @@
     if (m.attachments.length || m.files.length) {
       attHtml = '<div class="attach-row">';
       m.attachments.forEach((a, i) => { attHtml += `<span class="attach-chip" data-att="${i}">📎 ${escapeHtml(a.name)}${a.size ? ' <span class="x">' + fmtSize(a.size) + '</span>' : ''}</span>`; });
-      m.files.forEach(f => { attHtml += `<span class="attach-chip" title="binary not included in export">📄 ${escapeHtml(f.name)} <span class="x">image/binary</span></span>`; });
+      m.files.forEach((f, i) => { attHtml += `<span class="attach-chip" data-file="${i}" title="${f.content ? 'Open to view extracted text' : 'Binary content not included in export'}">📄 ${escapeHtml(f.name)}<span class="x">${f.content ? 'text' : 'binary'}</span></span>`; });
       attHtml += '</div>';
     }
 
@@ -288,6 +288,7 @@
     wrap.querySelectorAll('[data-art-dl]').forEach(b => b.onclick = () => X.downloadArtifact(c.artifacts.find(a => a.id === b.dataset.artDl)));
     wrap.querySelectorAll('[data-art-alt]').forEach(b => b.onclick = (e) => artifactAltMenu(e.currentTarget, c.artifacts.find(a => a.id === b.dataset.artAlt)));
     wrap.querySelectorAll('[data-att]').forEach(b => b.onclick = () => viewAttachment(m.attachments[+b.dataset.att]));
+    wrap.querySelectorAll('[data-file]').forEach(b => b.onclick = () => viewAttachment(m.files[+b.dataset.file]));
     wrap.querySelector('[data-copy]').onclick = () => { copyText(X.messageToText(m)); };
     wrap.querySelector('[data-exp]').onclick = (e) => messageExportMenu(e.currentTarget, m, c);
     wrap.querySelector('[data-sel]').onclick = () => toggleSelect(m.id);
@@ -457,9 +458,18 @@
     if (!att) return;
     $('#modal-title').textContent = att.name + (att.type ? '  ·  ' + att.type : '');
     const body = $('#modal-body'); body.innerHTML = '';
-    if (att.content) { const pre = document.createElement('pre'); pre.textContent = att.content; body.appendChild(pre); }
-    else { body.innerHTML = '<p style="color:var(--text-dim)">This attachment\'s binary content is not included in Claude exports — only extracted text is stored, and none was found here.</p>'; }
-    $('#modal-dl').onclick = () => att.content ? X.download(P.safeName(att.name) + '.txt', att.content) : toast('No extractable content');
+    if (att.content) {
+      const isMd = /\.(md|markdown)$/i.test(att.name || '') || /markdown/i.test(att.type || '');
+      if (isMd) { const div = document.createElement('div'); div.innerHTML = renderMarkdown(att.content); body.appendChild(div); }
+      else { const pre = document.createElement('pre'); pre.textContent = att.content; body.appendChild(pre); }
+    } else {
+      body.innerHTML = '<p style="color:var(--text-dim)">No extractable text is stored for this file. Claude exports keep only the extracted text of an attachment, not the original binary (image/PDF/etc.), so there is nothing to display here.</p>';
+    }
+    $('#modal-dl').onclick = () => {
+      if (!att.content) return toast('No extractable content to download');
+      const name = /\.\w+$/.test(att.name || '') ? att.name : (P.safeName(att.name || 'attachment') + '.txt');
+      X.download(name, att.content);
+    };
     $('#modal-dl-alt').style.display = 'none';
     $('#modal-back').classList.add('open');
   }

@@ -63,28 +63,39 @@
         if (type === 'text' && typeof block.text === 'string') {
           textParts.push(block.text);
           blocks.push({ type: 'text', text: block.text });
-        } else if (type === 'tool_use' && (block.name === 'artifacts' || (block.input && block.input.command))) {
-          const inp = block.input || {};
-          const cmd = inp.command || 'create';
-          const id = inp.id || inp.identifier || ('art_' + order.n);
-          let st = artstate.get(id);
-          if (!st) {
-            st = { id, title: inp.title || 'Untitled', type: inp.type || '', language: inp.language || '', content: '', _order: order.n++ };
-            artstate.set(id, st);
-          }
-          if (inp.title) st.title = inp.title;
-          if (inp.type) st.type = inp.type;
-          if (inp.language) st.language = inp.language;
-          if (cmd === 'create' || cmd === 'rewrite') {
-            st.content = inp.content != null ? inp.content : st.content;
-          } else if (cmd === 'update') {
-            st.content = applyUpdate(st.content, inp.old_str, inp.new_str);
-          }
-          // record a reference (snapshot resolved later)
-          blocks.push({ type: 'artifact-ref', id });
-          if (!msgArtifacts.includes(id)) msgArtifacts.push(id);
         } else if (type === 'tool_use') {
-          blocks.push({ type: 'tool_use', name: block.name || 'tool', input: block.input });
+          const inp = block.input || {};
+          const cmd = inp.command;
+          // Only a genuine artifacts tool call is an artifact. Other tools
+          // (bash/code-execution, repl, etc.) also carry an input.command, so
+          // we must NOT treat every command-bearing tool_use as an artifact —
+          // that produced blank "Untitled" cards. Require the artifacts tool
+          // name, or an artifact-shaped create/update/rewrite command.
+          const isArtifact = block.name === 'artifacts'
+            || (/^(create|update|rewrite)$/.test(cmd || '')
+                && (inp.id != null || inp.identifier != null || inp.title != null
+                    || inp.content != null || inp.type != null || inp.old_str != null));
+          if (isArtifact) {
+            const command = cmd || 'create';
+            const id = inp.id || inp.identifier || ('art_' + order.n);
+            let st = artstate.get(id);
+            if (!st) {
+              st = { id, title: inp.title || 'Untitled', type: inp.type || '', language: inp.language || '', content: '', _order: order.n++ };
+              artstate.set(id, st);
+            }
+            if (inp.title) st.title = inp.title;
+            if (inp.type) st.type = inp.type;
+            if (inp.language) st.language = inp.language;
+            if (command === 'create' || command === 'rewrite') {
+              st.content = inp.content != null ? inp.content : st.content;
+            } else if (command === 'update') {
+              st.content = applyUpdate(st.content, inp.old_str, inp.new_str);
+            }
+            blocks.push({ type: 'artifact-ref', id });
+            if (!msgArtifacts.includes(id)) msgArtifacts.push(id);
+          } else {
+            blocks.push({ type: 'tool_use', name: block.name || 'tool', input: block.input });
+          }
         } else if (type === 'tool_result') {
           blocks.push({ type: 'tool_result', name: block.name });
         }
@@ -105,8 +116,14 @@
       content: a.extracted_content || a.content || ''
     }));
     const files = [];
-    (raw.files || raw.files_v2 || []).forEach(f => {
-      files.push({ name: f.file_name || f.name || (f.file_kind ? f.file_kind + ' file' : 'file'), kind: f.file_kind || '' });
+    (raw.files_v2 || raw.files || []).forEach(f => {
+      files.push({
+        name: f.file_name || f.name || (f.file_kind ? f.file_kind + ' file' : 'file'),
+        kind: f.file_kind || '',
+        type: f.file_type || f.file_kind || '',
+        size: f.file_size || f.size || null,
+        content: f.extracted_content || f.content || (f.document && f.document.extracted_content) || ''
+      });
     });
 
     return {
