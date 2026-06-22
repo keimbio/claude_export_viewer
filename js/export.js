@@ -91,98 +91,213 @@ pre{background:rgba(0,0,0,.35);padding:12px;border-radius:8px;overflow:auto;font
 <body><h1>${escapeHtml(c.title)}</h1><p style="color:#9fb4b6">Created: ${escapeHtml(fmtDate(c.created))} · Updated: ${escapeHtml(fmtDate(c.updated))}</p>${rows}</body></html>`;
   }
 
-  // ---------- pdf (jsPDF text layout) ----------
-  // Wrap text to maxW. Splits on real newlines, then on spaces (via jsPDF),
-  // then HARD-breaks any remaining over-long run by character so nothing
-  // overflows the right margin. Assumes the caller already set the font/size.
-  function wrapText(doc, text, maxW) {
-    const out = [];
-    String(text == null ? '' : text).replace(/\r\n?/g, '\n').replace(/\t/g, '  ').split('\n').forEach(line => {
-      if (line === '') { out.push(''); return; }
-      doc.splitTextToSize(line, maxW).forEach(seg => {
-        // jsPDF only breaks on spaces; force-break long unbreakable tokens.
-        while (seg.length > 1 && doc.getTextWidth(seg) > maxW) {
-          let lo = 1, hi = seg.length;
-          while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (doc.getTextWidth(seg.slice(0, mid)) <= maxW) lo = mid; else hi = mid - 1; }
-          out.push(seg.slice(0, lo)); seg = seg.slice(lo);
+  // ============================ pdf (chat-log layout) ============================
+  // Renders a conversation the way the web app shows it: speaker-coloured headers
+  // with a left accent bar, markdown-aware body (headings, bold/italic, inline
+  // code, lists), and shaded monospace code boxes. Real (selectable / copy-able)
+  // text throughout. Uses embedded Hanken Grotesk + DejaVu Sans Mono when present,
+  // else falls back to the built-in helvetica / courier.
+  const PDF = {
+    M: 50, bodySize: 10.3, bodyLH: 1.5, codeSize: 8.6, codeLH: 1.45, indent: 15,
+    ink: '#1f2a2e', muted: '#6a7b80', rule: '#e1e7e7',
+    human: { accent: '#3d8bb5', label: '#2a6f95', name: 'Human' },
+    asst: { accent: '#3fa17d', label: '#2f8f63', name: 'Claude' },
+    codeBg: '#f3f5f6', codeBorder: '#dde4e5', codeInk: '#26323a', inlineBg: '#eceff0', inlineInk: '#1c3a4a'
+  };
+
+  function newCtx() {
+    const { jsPDF } = global.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    let sans = 'helvetica', mono = 'courier';
+    if (global.ClaudePdfFonts && global.ClaudePdfFonts.register(doc)) { sans = 'Hanken'; mono = 'Mono'; }
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    return { doc, fam: { sans, mono }, W, H, M: PDF.M, y: PDF.M, accent: null };
+  }
+
+  function measure(ctx, r) { ctx.doc.setFont(r.font, r.style); ctx.doc.setFontSize(r.size); return ctx.doc.getTextWidth(r.text); }
+
+  // Split inline markdown (`code`, **bold**, *italic*) into styled runs.
+  function inlineRuns(text, fam, size, color) {
+    const runs = [];
+    const push = (t, style, code) => { if (t) runs.push({ text: t, font: code ? fam.mono : fam.sans, style: code ? 'normal' : (style || 'normal'), size: code ? size * 0.92 : size, color: code ? PDF.inlineInk : color, code: !!code }); };
+    const re = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|(?:^|\s)_[^_\n]+_(?=\s|$))/g;
+    let last = 0, m;
+    while ((m = re.exec(String(text)))) {
+      let tok = m[0], lead = '';
+      if (/^\s/.test(tok) && tok[1] === '_') { lead = tok[0]; tok = tok.slice(1); }
+      push(String(text).slice(last, m.index) + lead, 'normal', false);
+      if (tok[0] === '`') push(tok.slice(1, -1), 'normal', true);
+      else if (tok.startsWith('**') || tok.startsWith('__')) push(tok.slice(2, -2), 'bold', false);
+      else push(tok.slice(1, -1), 'italic', false);
+      last = m.index + m[0].length;
+    }
+    push(String(text).slice(last), 'normal', false);
+    return runs.length ? runs : [{ text: '', font: fam.sans, style: 'normal', size, color, code: false }];
+  }
+
+  // Greedy line-break a list of styled runs to maxW; hard-breaks over-long tokens.
+  function wrapRuns(ctx, runs, maxW) {
+    const lines = []; let line = [], lineW = 0;
+    const flush = () => { while (line.length && /^\s+$/.test(line[line.length - 1].text)) line.pop(); lines.push(line); line = []; lineW = 0; };
+    runs.forEach(run => {
+      run.text.split(/(\s+)/).forEach(tok => {
+        if (tok === '') return;
+        const isSpace = /^\s+$/.test(tok);
+        let piece = { text: tok, font: run.font, style: run.style, size: run.size, color: run.color, code: run.code };
+        let w = measure(ctx, piece);
+        if (!isSpace && lineW + w > maxW && line.length) flush();
+        if (isSpace && line.length === 0) return;
+        if (!isSpace) {
+          while (w > maxW && piece.text.length > 1) {
+            const room = line.length ? maxW - lineW : maxW;
+            let lo = 0, hi = piece.text.length;
+            while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (measure(ctx, { ...piece, text: piece.text.slice(0, mid) }) <= room) lo = mid; else hi = mid - 1; }
+            if (lo === 0) { if (line.length) { flush(); continue; } lo = 1; }
+            const head = { ...piece, text: piece.text.slice(0, lo) };
+            line.push(head); flush();
+            piece = { ...piece, text: piece.text.slice(lo) }; w = measure(ctx, piece);
+          }
         }
-        out.push(seg);
+        line.push(piece); lineW += w;
       });
     });
-    return out;
+    flush();
+    return lines.length ? lines : [[]];
   }
 
-  function makeCtx(doc) {
-    const M = 48, W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-    return { doc, M, W, H, maxW: W - M * 2, y: M };
-  }
-
-  // Draw a text block. One VISUAL line per draw, y advanced by a real line
-  // height each time — this is what keeps lines from overlapping.
-  function block(ctx, text, opt) {
+  // Render a paragraph of runs with wrapping, accent bar, optional list marker.
+  function para(ctx, text, opt) {
     opt = opt || {};
-    const size = opt.size || 10.5, mono = !!opt.mono, indent = opt.indent || 0;
-    ctx.doc.setFont(mono ? 'courier' : 'helvetica', opt.style || 'normal');
-    ctx.doc.setFontSize(size);
-    ctx.doc.setTextColor(opt.color || '#1c2b2e');
-    const lh = size * 1.42;
-    wrapText(ctx.doc, text, ctx.maxW - indent).forEach(ln => {
+    const size = opt.size || PDF.bodySize, lh = (opt.lh || PDF.bodyLH) * size;
+    const left = opt.left != null ? opt.left : (ctx.M + PDF.indent);
+    const right = ctx.W - ctx.M;
+    const markerGap = (opt.bulletCircle || opt.bulletText) ? 14 : 0;
+    const runs = opt.runs || inlineRuns(text, ctx.fam, size, opt.color || PDF.ink);
+    const lines = wrapRuns(ctx, runs, right - left - markerGap);
+    lines.forEach((ln, idx) => {
       if (ctx.y + lh > ctx.H - ctx.M) { ctx.doc.addPage(); ctx.y = ctx.M; }
-      ctx.doc.text(ln, ctx.M + indent, ctx.y);
+      if (ctx.accent) { ctx.doc.setFillColor(ctx.accent); ctx.doc.rect(ctx.M, ctx.y, 3, lh, 'F'); }
+      const baseY = ctx.y + lh * 0.72;
+      if (idx === 0 && opt.bulletCircle) { ctx.doc.setFillColor(opt.markerColor || PDF.muted); ctx.doc.circle(left + 4, ctx.y + lh * 0.52, 1.5, 'F'); }
+      if (idx === 0 && opt.bulletText) { ctx.doc.setFont(ctx.fam.sans, 'normal', size); ctx.doc.setFontSize(size); ctx.doc.setTextColor(opt.markerColor || PDF.muted); ctx.doc.text(opt.bulletText, left, baseY); }
+      let x = left + markerGap;
+      ln.forEach(r => {
+        const w = measure(ctx, r);
+        if (r.code) { ctx.doc.setFillColor(PDF.inlineBg); ctx.doc.roundedRect(x - 1, ctx.y + lh * 0.14, w + 2, lh * 0.74, 2, 2, 'F'); }
+        ctx.doc.setFont(r.font, r.style); ctx.doc.setFontSize(r.size); ctx.doc.setTextColor(r.color);
+        ctx.doc.text(r.text, x, baseY); x += w;
+      });
       ctx.y += lh;
     });
-    if (opt.gapAfter) ctx.y += opt.gapAfter;
+    ctx.y += (opt.gapAfter != null ? opt.gapAfter : size * 0.5);
   }
 
-  // Render a message body with fenced-code awareness: ```code``` -> monospace.
-  function renderBody(ctx, text) {
+  // Shaded monospace code box; splits cleanly across pages.
+  function codeBox(ctx, code) {
+    const size = PDF.codeSize, lh = PDF.codeLH * size, padX = 9, padY = 7;
+    const boxL = ctx.M + PDF.indent, boxR = ctx.W - ctx.M, innerW = boxR - boxL - padX * 2;
+    ctx.doc.setFont(ctx.fam.mono, 'normal'); ctx.doc.setFontSize(size);
+    const wrapped = [];
+    String(code).replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n').forEach(line => {
+      if (line === '') { wrapped.push(''); return; }
+      ctx.doc.splitTextToSize(line, innerW).forEach(s => {
+        while (s.length > 1 && ctx.doc.getTextWidth(s) > innerW) {
+          let lo = 1, hi = s.length;
+          while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ctx.doc.getTextWidth(s.slice(0, mid)) <= innerW) lo = mid; else hi = mid - 1; }
+          wrapped.push(s.slice(0, lo)); s = s.slice(lo);
+        }
+        wrapped.push(s);
+      });
+    });
+    let i = 0;
+    while (i < wrapped.length) {
+      if (ctx.y + lh + padY * 2 > ctx.H - ctx.M) { ctx.doc.addPage(); ctx.y = ctx.M; }
+      const avail = (ctx.H - ctx.M) - ctx.y - padY * 2;
+      const n = Math.min(wrapped.length - i, Math.max(1, Math.floor(avail / lh)));
+      const seg = wrapped.slice(i, i + n), boxH = seg.length * lh + padY * 2;
+      ctx.doc.setFillColor(PDF.codeBg); ctx.doc.setDrawColor(PDF.codeBorder); ctx.doc.setLineWidth(0.7);
+      ctx.doc.roundedRect(boxL, ctx.y, boxR - boxL, boxH, 4, 4, 'FD');
+      if (ctx.accent) { ctx.doc.setFillColor(ctx.accent); ctx.doc.rect(ctx.M, ctx.y, 3, boxH, 'F'); }
+      ctx.doc.setFont(ctx.fam.mono, 'normal'); ctx.doc.setFontSize(size); ctx.doc.setTextColor(PDF.codeInk);
+      let ty = ctx.y + padY + lh * 0.72;
+      seg.forEach(s => { ctx.doc.text(s, boxL + padX, ty); ty += lh; });
+      ctx.y += boxH; i += n;
+      if (i < wrapped.length) { ctx.doc.addPage(); ctx.y = ctx.M; }
+    }
+    ctx.y += 5;
+  }
+
+  // Block-level markdown: fenced code, headings, lists, quotes, rules, paragraphs.
+  function renderMarkdown(ctx, text) {
     if (!text) return;
-    String(text).split('```').forEach((part, i) => {
-      if (part === '') return;
-      if (i % 2 === 1) {
-        const body = part.replace(/^[ \t]*[\w.+-]*\n/, '').replace(/\n+$/, ''); // strip lang label + trailing nl
-        block(ctx, body, { size: 8.5, mono: true, color: '#243', gapAfter: 5 });
-      } else {
-        block(ctx, part.replace(/^\n+|\n+$/g, ''), { size: 10.5, color: '#1c2b2e', gapAfter: 3 });
+    String(text).replace(/\r\n?/g, '\n').split('```').forEach((part, pi) => {
+      if (pi % 2 === 1) {
+        let code = part; const nl = part.indexOf('\n');
+        const first = (nl === -1 ? part : part.slice(0, nl)).trim();
+        if (/^[a-zA-Z0-9_+\-.]{0,16}$/.test(first)) code = nl === -1 ? '' : part.slice(nl + 1);
+        codeBox(ctx, code.replace(/\n+$/, ''));
+        return;
       }
+      const lines = part.split('\n'); let buf = [];
+      const flush = () => { if (buf.length) { para(ctx, buf.join(' ')); buf = []; } };
+      lines.forEach(raw => {
+        const t = raw.trim(); let mm;
+        if (t === '') { flush(); return; }
+        if ((mm = /^(#{1,6})\s+(.*)$/.exec(t))) {
+          flush(); const lv = mm[1].length, sz = lv <= 1 ? 14.5 : lv === 2 ? 12.8 : lv === 3 ? 11.6 : 11;
+          ctx.y += 3;
+          para(ctx, null, { runs: inlineRuns(mm[2], ctx.fam, sz, PDF.ink).map(r => r.code ? r : { ...r, style: 'bold' }), size: sz, lh: 1.3, gapAfter: sz * 0.35 });
+          return;
+        }
+        if (/^(---|\*\*\*|___)\s*$/.test(t)) { flush(); ctx.y += 2; ctx.doc.setDrawColor(PDF.rule); ctx.doc.setLineWidth(0.8); ctx.doc.line(ctx.M + PDF.indent, ctx.y, ctx.W - ctx.M, ctx.y); ctx.y += 8; return; }
+        if ((mm = /^[-*+]\s+(.*)$/.exec(t))) { flush(); para(ctx, mm[1], { left: ctx.M + PDF.indent + 6, bulletCircle: true, markerColor: ctx.accent || PDF.muted, gapAfter: 2 }); return; }
+        if ((mm = /^(\d+)[.)]\s+(.*)$/.exec(t))) { flush(); para(ctx, mm[2], { left: ctx.M + PDF.indent + 6, bulletText: mm[1] + '.', markerColor: ctx.accent || PDF.muted, gapAfter: 2 }); return; }
+        if ((mm = /^>\s?(.*)$/.exec(t))) { flush(); para(ctx, null, { runs: inlineRuns(mm[1], ctx.fam, PDF.bodySize, PDF.muted).map(r => r.code ? r : { ...r, style: 'italic' }), left: ctx.M + PDF.indent + 8, gapAfter: 2 }); return; }
+        buf.push(t);
+      });
+      flush();
     });
   }
 
-  function renderConversation(ctx, c) {
-    block(ctx, c.title, { size: 18, style: 'bold', color: '#143028', gapAfter: 2 });
-    block(ctx, 'Created: ' + fmtDate(c.created) + '   Updated: ' + fmtDate(c.updated), { size: 9, style: 'italic', color: '#5a7075', gapAfter: 8 });
-    c.messages.forEach(m => {
-      if (ctx.y + 28 > ctx.H - ctx.M) { ctx.doc.addPage(); ctx.y = ctx.M; }
-      ctx.y += 6;
-      ctx.doc.setDrawColor('#cdd8d8'); ctx.doc.line(ctx.M, ctx.y, ctx.W - ctx.M, ctx.y); ctx.y += 14;
-      block(ctx, who(m.sender) + '  ·  ' + fmtDate(m.created), { size: 10, style: 'bold', color: m.sender === 'human' ? '#2a6f95' : '#2f8f63', gapAfter: 3 });
-      renderBody(ctx, m.text);
-      m.attachments.forEach(a => {
-        block(ctx, 'Attachment: ' + a.name, { size: 9, style: 'italic', color: '#5a7075', gapAfter: 2 });
-        if (a.content) block(ctx, a.content, { size: 8, mono: true, color: '#3a5055', gapAfter: 5 });
-      });
-      m.artifactIds.forEach(id => {
-        const art = c.artifacts.find(x => x.id === id); if (!art) return;
-        block(ctx, 'Artifact: ' + art.title + ' (' + art.filename + ')', { size: 9.5, style: 'bold', color: '#2f8f63', gapAfter: 2 });
-        block(ctx, art.content, { size: 8, mono: true, color: '#243', gapAfter: 5 });
-      });
-    });
+  function labelLine(ctx, text, color, style) {
+    para(ctx, null, { runs: [{ text, font: ctx.fam.sans, style: style || 'bold', size: 9.3, color, code: false }], size: 9.3, gapAfter: 3 });
   }
 
-  function conversationToPdf(c) {
-    const { jsPDF } = global.jspdf;
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    renderConversation(makeCtx(doc), c);
-    return doc;
+  function renderMessage(ctx, c, m) {
+    const sp = m.sender === 'human' ? PDF.human : PDF.asst;
+    ctx.y += 12;
+    if (ctx.y + 44 > ctx.H - ctx.M) { ctx.doc.addPage(); ctx.y = ctx.M; }
+    // header: coloured sender (left) + muted timestamp (right)
+    ctx.doc.setFont(ctx.fam.sans, 'bold'); ctx.doc.setFontSize(11); ctx.doc.setTextColor(sp.label);
+    ctx.doc.text(sp.name, ctx.M, ctx.y + 9);
+    ctx.doc.setFont(ctx.fam.sans, 'normal'); ctx.doc.setFontSize(8.6); ctx.doc.setTextColor(PDF.muted);
+    ctx.doc.text(fmtDate(m.created), ctx.W - ctx.M, ctx.y + 9, { align: 'right' });
+    ctx.y += 15;
+    ctx.doc.setDrawColor(sp.accent); ctx.doc.setLineWidth(0.9); ctx.doc.line(ctx.M, ctx.y, ctx.W - ctx.M, ctx.y);
+    ctx.y += 9;
+    ctx.accent = sp.accent;
+    renderMarkdown(ctx, m.text);
+    (m.attachments || []).forEach(a => { ctx.y += 3; labelLine(ctx, 'Attachment: ' + a.name, PDF.muted, 'italic'); if (a.content) codeBox(ctx, a.content); });
+    (m.files || []).forEach(f => { if (f.content) { ctx.y += 3; labelLine(ctx, 'File: ' + f.name, PDF.muted, 'italic'); codeBox(ctx, f.content); } });
+    (m.artifactIds || []).forEach(id => { const art = c.artifacts.find(x => x.id === id); if (!art) return; ctx.y += 3; labelLine(ctx, 'Artifact: ' + art.title + '  (' + art.filename + ')', sp.label, 'bold'); if (art.content) codeBox(ctx, art.content); });
+    ctx.accent = null;
+    ctx.y += 4;
   }
 
-  // Multiple conversations into one PDF (page break between each).
+  function renderConversationDoc(ctx, c) {
+    para(ctx, null, { runs: [{ text: c.title, font: ctx.fam.sans, style: 'bold', size: 16.5, color: PDF.ink, code: false }], size: 16.5, lh: 1.25, left: ctx.M, gapAfter: 3 });
+    para(ctx, null, { runs: [{ text: 'Created ' + fmtDate(c.created) + '    ·    Updated ' + fmtDate(c.updated) + '    ·    ' + c.messages.length + ' messages', font: ctx.fam.sans, style: 'normal', size: 9, color: PDF.muted, code: false }], size: 9, left: ctx.M, gapAfter: 7 });
+    ctx.doc.setDrawColor(PDF.rule); ctx.doc.setLineWidth(1); ctx.doc.line(ctx.M, ctx.y, ctx.W - ctx.M, ctx.y);
+    ctx.y += 2;
+    c.messages.forEach(m => renderMessage(ctx, c, m));
+  }
+
+  function conversationToPdf(c) { const ctx = newCtx(); renderConversationDoc(ctx, c); return ctx.doc; }
+
   function conversationsToPdf(convs) {
-    const { jsPDF } = global.jspdf;
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const ctx = makeCtx(doc);
-    convs.forEach((c, i) => { if (i) { doc.addPage(); ctx.y = ctx.M; } renderConversation(ctx, c); });
-    return doc;
+    const ctx = newCtx();
+    convs.forEach((c, i) => { if (i) { ctx.doc.addPage(); ctx.y = ctx.M; } renderConversationDoc(ctx, c); });
+    return ctx.doc;
   }
 
   // ---------- png via html2canvas ----------
